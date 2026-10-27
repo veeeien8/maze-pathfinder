@@ -1,0 +1,11 @@
+Maze         Algorithm  Found     Path   Explored  Runtime (s)
+-------------------------------------------------------------------
+maze1.txt    IDS        True        10         66     0.000094
+maze1.txt    A*         True        10         11     0.000208
+maze1.txt    IDA*       True        10         11     0.000026
+maze2.txt    IDS        True        71       6833     0.021971
+maze2.txt    A*         True        71        172     0.000403
+maze2.txt    IDA*       True        71       1773     0.005363
+maze3.txt    IDS        True         4         18     0.000022
+maze3.txt    A*         True         4          5     0.000015
+maze3.txt    IDA*       True         4          6     0.000008

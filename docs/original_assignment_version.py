@@ -1,0 +1,464 @@
+import sys
+import time
+
+class Node():
+    def __init__(self, state, parent, action):
+        self.state = state
+        self.parent = parent
+        self.action = action
+
+
+class StackFrontier():
+    def __init__(self):
+        self.frontier = []
+
+    def add(self, node):
+        self.frontier.append(node)
+
+    def contains_state(self, state):
+        return any(node.state == state for node in self.frontier)
+
+    def empty(self):
+        return len(self.frontier) == 0
+
+    def remove(self):
+        if self.empty():
+            raise Exception("empty frontier")
+        else:
+            node = self.frontier[-1]
+            self.frontier = self.frontier[:-1]
+            return node
+
+
+class QueueFrontier(StackFrontier):
+
+    def remove(self):
+        if self.empty():
+            raise Exception("empty frontier")
+        else:
+            node = self.frontier[0]
+            self.frontier = self.frontier[1:]
+            return node
+
+class Maze():
+
+    def __init__(self, filename):
+
+        # Read file and set height and width of maze
+        with open(filename) as f:
+            contents = f.read()
+
+        # Validate start and goal
+        if contents.count("A") != 1:
+            raise Exception("maze must have exactly one start point")
+        if contents.count("B") != 1:
+            raise Exception("maze must have exactly one goal")
+
+        # Determine height and width of maze
+        contents = contents.splitlines()
+        self.height = len(contents)
+        self.width = max(len(line) for line in contents)
+
+        # Keep track of walls
+        self.walls = []
+        for i in range(self.height):
+            row = []
+            for j in range(self.width):
+                try:
+                    if contents[i][j] == "A":
+                        self.start = (i, j)
+                        row.append(False)
+                    elif contents[i][j] == "B":
+                        self.goal = (i, j)
+                        row.append(False)
+                    elif contents[i][j] == " ":
+                        row.append(False)
+                    else:
+                        row.append(True)
+                except IndexError:
+                    row.append(False)
+            self.walls.append(row)
+
+        self.solution = None
+
+
+    def print(self):
+        solution = self.solution[1] if self.solution is not None else None
+        print()
+        for i, row in enumerate(self.walls):
+            for j, col in enumerate(row):
+                if col:
+                    print("█", end="")
+                elif (i, j) == self.start:
+                    print("A", end="")
+                elif (i, j) == self.goal:
+                    print("B", end="")
+                elif solution is not None and (i, j) in solution:
+                    print("*", end="")
+                else:
+                    print(" ", end="")
+            print()
+        print()
+
+
+    def neighbors(self, state):
+        row, col = state
+        candidates = [
+            ("U", (row - 1, col)),
+            ("D", (row + 1, col)),
+            ("L", (row, col - 1)),
+            ("R", (row, col + 1))
+        ]
+
+        result = []
+        for action, (r, c) in candidates:
+            if 0 <= r < self.height and 0 <= c < self.width and not self.walls[r][c]:
+                result.append((action, (r, c)))
+        return result
+
+    def ids(self, max_depth=50):
+        """Iterative Deepening Search (IDS)."""
+
+        self.num_explored = 0
+        self.solution = None
+
+        for depth_limit in range(max_depth + 1):
+
+            # Reset explored states for this IDS iteration
+            self.explored = set()
+
+            result = self.dls(depth_limit)
+
+            if result is not None:
+                self.set_solution(result)
+                self.print_statistics()
+                return result
+
+        print("No solution found within the maximum depth limit.")
+        return None
+
+
+    def dls(self, depth_limit):
+        """Depth-Limited Search using StackFrontier."""
+        start = Node(state=self.start, parent=None, action=None)
+        frontier = StackFrontier()
+        frontier.add(start)
+        # Store the depth of each Node
+        depths = {start: 0}
+
+        while not frontier.empty():
+            node = frontier.remove()
+            depth = depths[node]
+            self.num_explored += 1
+            self.explored.add(node.state)
+
+            # Goal found
+            if node.state == self.goal:
+                return node
+
+            # Don't expand beyond depth limit
+            if depth == depth_limit:
+                continue
+
+            # Get states already in this node's path
+            path = set()
+            current = node
+
+            while current is not None:
+                path.add(current.state)
+                current = current.parent
+
+            # Add children to frontier
+            for action, state in self.neighbors(node.state):
+                # Prevent cycles in the current path
+                if state in path:
+                    continue
+                child = Node(state=state, parent=node, action=action)
+                depths[child] = depth + 1
+                frontier.add(child)
+        return None
+
+    def heuristic(self, state):
+        """Heuristic function for A* and IDA* search algorithms."""
+        # Using Manhattan distance as the heuristic
+        return abs(state[0] - self.goal[0]) + abs(state[1] - self.goal[1])
+
+    def a_star(self):
+        """A* Search."""
+        from queue import PriorityQueue
+        self.num_explored = 0
+        self.solution = None
+        self.explored = set()
+
+        frontier = PriorityQueue()
+        start = Node(state=self.start, parent=None, action=None)
+        # Stores cheapest known cost from start to each state
+        g_score = {self.start: 0}
+
+        # Used to break ties if two nodes have the same f-cost
+        counter = 0
+        frontier.put((self.heuristic(self.start), counter, 0, start))
+
+        while not frontier.empty():
+            f_cost, _, g_cost, node = frontier.get()
+
+            # Ignore outdated entries in the priority queue
+            if g_cost != g_score.get(node.state):
+                continue
+
+            # Ignore states already fully explored
+            if node.state in self.explored:
+                continue
+
+            self.num_explored += 1
+
+            # Goal found
+            if node.state == self.goal:
+                self.set_solution(node)
+                self.print_statistics()
+                return node
+
+            self.explored.add(node.state)
+
+            # Explore neighbors
+            for action, state in self.neighbors(node.state):
+
+                if state in self.explored:
+                    continue
+
+                # Each move costs 1
+                new_g = g_cost + 1
+                if new_g < g_score.get(state, float("inf")):
+                    g_score[state] = new_g
+                    child = Node(state=state, parent=node, action=action)
+                    h_cost = self.heuristic(state)
+                    new_f = new_g + h_cost
+                    counter += 1
+                    frontier.put((new_f, counter, new_g, child))
+
+        print("No solution found using A* search.")
+        return None
+
+    def ida_star(self):
+        """Iterative Deepening A* (IDA*) Search."""
+        self.num_explored = 0
+        self.solution = None
+        # Initial threshold
+        threshold = self.heuristic(self.start)
+
+        while True:
+            # Reset explored states for each iteration
+            self.explored = set()
+            result, new_threshold = self.dls_ida(threshold)
+
+            # Goal found
+            if result is not None:
+                self.set_solution(result)
+                self.print_statistics()
+                return result
+
+            # No larger threshold exists, so no solution
+            if new_threshold == float("inf"):
+                print("No solution found using IDA* search.")
+                return None
+            threshold = new_threshold
+
+
+    def dls_ida(self, threshold):
+        """Depth-Limited Search for IDA* using StackFrontier."""
+        start = Node(state=self.start, parent=None, action=None)
+
+        frontier = StackFrontier()
+        frontier.add(start)
+
+        # Store g-cost from start to each Node
+        g_costs = {start: 0}
+
+        next_threshold = float("inf")
+
+        while not frontier.empty():
+            node = frontier.remove()
+            g_cost = g_costs[node]
+            f_cost = g_cost + self.heuristic(node.state)
+
+            self.num_explored += 1
+            self.explored.add(node.state)
+
+            # This node is too expensive for this iteration
+            if f_cost > threshold:
+                next_threshold = min(next_threshold, f_cost)
+                continue
+
+            # Goal found
+            if node.state == self.goal:
+                return node, next_threshold
+
+            # Get states already in this node's current path
+            path = set()
+            current = node
+
+            while current is not None:
+                path.add(current.state)
+                current = current.parent
+
+            # Add children to frontier
+            for action, state in self.neighbors(node.state):
+                # Prevent cycles in the current path
+                if state in path:
+                    continue
+
+                child = Node(state=state, parent=node, action=action)
+
+                # Each move costs 1
+                g_costs[child] = g_cost + 1
+                frontier.add(child)
+        return None, next_threshold
+    
+    # def dfs(self):
+    #     """Finds a solution to maze, if one exists."""
+
+    #     # Keep track of number of states explored
+    #     self.num_explored = 0
+
+    #     # Initialize frontier to just the starting position
+    #     start = Node(state=self.start, parent=None, action=None)
+    #     frontier = StackFrontier()
+    #     frontier.add(start)
+
+    #     # Initialize an empty explored set
+    #     self.explored = set()
+
+    #     # Keep looping until solution found
+    #     while True:
+
+    #         # If nothing left in frontier, then no path
+    #         if frontier.empty():
+    #             print("No solution")
+    #             return
+
+    #         # Choose a node from the frontier
+    #         node = frontier.remove()
+    #         self.num_explored += 1
+
+    #         # If node is the goal, then we have a solution
+    #         if node.state == self.goal:
+    #             self.set_solution(node)
+    #             self.print_statistics()
+    #             return
+
+    #         # Mark node as explored
+    #         self.explored.add(node.state)
+
+    #         # Add neighbors to frontier
+    #         for action, state in self.neighbors(node.state):
+    #             if not frontier.contains_state(state) and state not in self.explored:
+    #                 child = Node(state=state, parent=node, action=action)
+    #                 frontier.add(child)
+
+    def set_solution(self, node):
+        actions = []
+        cells = []
+
+        while node.parent is not None:
+            actions.append(node.action)
+            cells.append(node.state)
+            node = node.parent
+
+        actions.reverse()
+        cells.reverse()
+
+        self.solution = (actions, cells)
+
+    def print_statistics(self):
+        print("Actions:", "-".join(self.solution[0]))
+        print("Path cost:", len(self.solution[0]))
+        print("Path length:", len(self.solution[0]))
+
+    def output_image(self, filename, show_solution=True, show_explored=False):
+        from PIL import Image, ImageDraw
+        cell_size = 50
+        cell_border = 2
+
+        # Create a blank canvas
+        img = Image.new(
+            "RGBA",
+            (self.width * cell_size, self.height * cell_size),
+            "black"
+        )
+        draw = ImageDraw.Draw(img)
+
+        solution = self.solution[1] if self.solution is not None else None
+        for i, row in enumerate(self.walls):
+            for j, col in enumerate(row):
+
+                # Walls
+                if col:
+                    fill = (40, 40, 40)
+
+                # Start
+                elif (i, j) == self.start:
+                    fill = (255, 0, 0)
+
+                # Goal
+                elif (i, j) == self.goal:
+                    fill = (0, 171, 28)
+
+                # Solution
+                elif solution is not None and show_solution and (i, j) in solution:
+                    fill = (220, 235, 113)
+
+                # Explored
+                elif solution is not None and show_explored and (i, j) in self.explored:
+                    fill = (212, 97, 85)
+
+                # Empty cell
+                else:
+                    fill = (237, 240, 252)
+
+                # Draw cell
+                draw.rectangle(
+                    ([(j * cell_size + cell_border, i * cell_size + cell_border),
+                      ((j + 1) * cell_size - cell_border, (i + 1) * cell_size - cell_border)]),
+                    fill=fill
+                )
+
+        img.save(filename)
+
+
+if len(sys.argv) != 2:
+    sys.exit("Usage: python maze.py maze.txt")
+
+m = Maze(sys.argv[1])
+print("Choose a search algorithm:")
+print("1. Iterative Deepening Search (IDS)")
+print("2. A*")
+print("3. IDA*")
+choice = input("Enter your choice (1-3): ")
+print("Maze:")
+m.print()
+print("Solving...\n")
+if choice == "1":
+    print("Algorithm: IDS")
+    start_time = time.perf_counter()
+    m.ids()
+    end_time = time.perf_counter()
+elif choice == "2":
+    print("Algorithm: A*")
+    start_time = time.perf_counter()
+    m.a_star()
+    end_time = time.perf_counter()
+elif choice == "3":
+    print("Algorithm: IDA*")
+    start_time = time.perf_counter()
+    m.ida_star()
+    end_time = time.perf_counter()
+else:
+    sys.exit("Invalid choice")
+
+print("States Explored:", m.num_explored)
+runtime = end_time - start_time
+print(f"Runtime: {runtime:.6f} seconds")
+if m.solution:
+    print("\nSolution:")
+    m.print()
+m.output_image("maze.png", show_explored=True)
